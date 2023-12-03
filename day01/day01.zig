@@ -1,5 +1,17 @@
 const std = @import("std");
 
+const stringDigits = [_][]const u8{
+    "one",
+    "two",
+    "three",
+    "four",
+    "five",
+    "six",
+    "seven",
+    "eight",
+    "nine",
+};
+
 pub fn main() !void {
     const file = try std.fs.cwd().openFile("input.txt", .{});
     defer file.close();
@@ -37,10 +49,24 @@ fn getDigit(slice: []const u8, comptime reverse: bool) !u8 {
         if (slice[i] - charOffset < 10) {
             break slice[i];
         }
+
+        const stringDigit = matchStringDigit(slice[i..]);
+        if (stringDigit != null) {
+            return @intCast(stringDigit.? + charOffset);
+        }
     } else {
         std.debug.print("Failed on this line: {s}", .{slice});
         unreachable;
     };
+}
+
+fn matchStringDigit(slice: []const u8) ?usize {
+    for (stringDigits, 0..) |digit, i| {
+        if (std.mem.startsWith(u8, slice, digit)) {
+            return i + 1;
+        }
+    }
+    return null;
 }
 
 fn increment(i: usize) usize {
