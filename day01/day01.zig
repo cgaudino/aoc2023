@@ -22,62 +22,46 @@ pub fn main() !void {
     defer alloc.free(input);
 
     var splits = std.mem.split(u8, input, "\n");
-    var count: u16 = 0;
-    var lineBuf: [2]u8 = [_]u8{ '0', '0' };
+    var partOneSum: u32 = 0;
+    var partTwoSum: u32 = 0;
+    var lineBuf = [_]u8{ '0', '0' };
+
     while (splits.next()) |line| {
         if (line.len == 0) {
             continue;
         }
 
-        lineBuf[0] = try getDigit(line, false);
-        lineBuf[1] = try getDigit(line, true);
+        lineBuf[0] = try getDigit(line, false, false);
+        lineBuf[1] = try getDigit(line, true, false);
+        partOneSum += try std.fmt.parseInt(u8, &lineBuf, 10);
 
-        const lineValue = try std.fmt.parseInt(u8, &lineBuf, 10);
-        count += lineValue;
+        lineBuf[0] = try getDigit(line, false, true);
+        lineBuf[1] = try getDigit(line, true, true);
+        partTwoSum += try std.fmt.parseInt(u8, &lineBuf, 10);
     }
 
-    std.debug.print("{d}\n", .{count});
+    std.debug.print("Part One: {d}\nPart Two: {d}\n", .{ partOneSum, partTwoSum });
 }
 
-fn getDigit(slice: []const u8, comptime reverse: bool) !u8 {
-    const condition = if (reverse) greaterThanZero else lessThanLast;
-    const iter = if (reverse) decrement else increment;
-    var i: usize = if (reverse) slice.len - 1 else 0;
-    const charOffset = 48;
+fn getDigit(slice: []const u8, comptime reverse: bool, comptime includeWords: bool) !u8 {
+    const zeroChar = '0';
+    const iter = comptime if (reverse) std.math.sub else std.math.add;
 
-    return while (condition(slice, i)) : (i = iter(i)) {
-        if (slice[i] - charOffset < 10) {
+    var i: usize = if (reverse) slice.len - 1 else 0;
+    return while (i >= 0 and i < slice.len) : (i = try iter(usize, i, 1)) {
+        if (slice[i] - zeroChar < 10) {
             break slice[i];
         }
 
-        const stringDigit = matchStringDigit(slice[i..]);
-        if (stringDigit != null) {
-            return @intCast(stringDigit.? + charOffset);
+        if (includeWords) {
+            for (stringDigits, 0..) |stringDigit, digit| {
+                if (std.mem.startsWith(u8, slice[i..], stringDigit)) {
+                    return @intCast(digit + zeroChar + 1);
+                }
+            }
         }
     } else {
         std.debug.print("Failed on this line: {s}", .{slice});
         unreachable;
     };
-}
-
-fn matchStringDigit(slice: []const u8) ?usize {
-    for (stringDigits, 0..) |digit, i| {
-        if (std.mem.startsWith(u8, slice, digit)) {
-            return i + 1;
-        }
-    }
-    return null;
-}
-
-fn increment(i: usize) usize {
-    return i + 1;
-}
-fn decrement(i: usize) usize {
-    return i - 1;
-}
-fn greaterThanZero(_: []const u8, i: usize) bool {
-    return i >= 0;
-}
-fn lessThanLast(slice: []const u8, i: usize) bool {
-    return i < slice.len;
 }
