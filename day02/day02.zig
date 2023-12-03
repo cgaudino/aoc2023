@@ -15,9 +15,6 @@ pub fn main() !void {
     try availableBlocks.put("green", 13);
     try availableBlocks.put("blue", 14);
 
-    var colorCounts = std.StringHashMap(u8).init(alloc);
-    defer colorCounts.clearAndFree();
-
     var requiredCounts = std.StringHashMap(u8).init(alloc);
     defer requiredCounts.clearAndFree();
 
@@ -39,8 +36,6 @@ pub fn main() !void {
         var gameIter = std.mem.tokenizeAny(u8, games, ";");
         var gameIsPossible = true;
         while (gameIter.next()) |game| {
-            colorCounts.clearRetainingCapacity();
-
             var colorIter = std.mem.tokenizeAny(u8, game, ",");
             while (colorIter.next()) |colorGroup| {
                 var countIter = std.mem.tokenizeScalar(u8, colorGroup, ' ');
@@ -48,18 +43,12 @@ pub fn main() !void {
                 const count = try std.fmt.parseInt(u8, countIter.next().?, 10);
                 const colorText = countIter.next().?;
 
-                var entry = try colorCounts.getOrPut(colorText);
-                entry.value_ptr.* = if (entry.found_existing) entry.value_ptr.* + count else count;
+                if (count > availableBlocks.get(colorText).?) {
+                    gameIsPossible = false;
+                }
 
                 var requiredEntry = try requiredCounts.getOrPut(colorText);
                 requiredEntry.value_ptr.* = if (requiredEntry.found_existing) @max(requiredEntry.value_ptr.*, count) else count;
-            }
-
-            var keyIter = colorCounts.keyIterator();
-            while (keyIter.next()) |key| {
-                if (colorCounts.get(key.*).? > availableBlocks.get(key.*).?) {
-                    gameIsPossible = false;
-                }
             }
         }
 
