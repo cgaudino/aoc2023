@@ -18,10 +18,15 @@ pub fn main() !void {
     var colorCounts = std.StringHashMap(u8).init(alloc);
     defer colorCounts.clearAndFree();
 
+    var requiredCounts = std.StringHashMap(u8).init(alloc);
+    defer requiredCounts.clearAndFree();
+
     var partOneCounter: u32 = 0;
+    var partTwoCounter: u32 = 0;
 
     var linesIter = std.mem.tokenizeAny(u8, input, "\n");
-    lines_loop: while (linesIter.next()) |line| {
+    while (linesIter.next()) |line| {
+        requiredCounts.clearRetainingCapacity();
         var sectionIter = std.mem.tokenizeAny(u8, line, ":");
 
         const header = sectionIter.next().?;
@@ -32,6 +37,7 @@ pub fn main() !void {
         const gameId = try std.fmt.parseInt(u32, headerIter.next().?, 10);
 
         var gameIter = std.mem.tokenizeAny(u8, games, ";");
+        var gameIsPossible = true;
         while (gameIter.next()) |game| {
             colorCounts.clearRetainingCapacity();
 
@@ -44,18 +50,31 @@ pub fn main() !void {
 
                 var entry = try colorCounts.getOrPut(colorText);
                 entry.value_ptr.* = if (entry.found_existing) entry.value_ptr.* + count else count;
+
+                var requiredEntry = try requiredCounts.getOrPut(colorText);
+                requiredEntry.value_ptr.* = if (requiredEntry.found_existing) @max(requiredEntry.value_ptr.*, count) else count;
             }
 
             var keyIter = colorCounts.keyIterator();
             while (keyIter.next()) |key| {
                 if (colorCounts.get(key.*).? > availableBlocks.get(key.*).?) {
-                    continue :lines_loop;
+                    gameIsPossible = false;
                 }
             }
         }
 
-        partOneCounter += gameId;
+        if (gameIsPossible) {
+            partOneCounter += gameId;
+        }
+
+        var requiredCountsIter = requiredCounts.valueIterator();
+        var power: u32 = 1;
+        while (requiredCountsIter.next()) |value| {
+            power *= value.*;
+        }
+        partTwoCounter += power;
     }
 
     std.debug.print("Part One: {d}\n", .{partOneCounter});
+    std.debug.print("Part Two: {d}\n", .{partTwoCounter});
 }
