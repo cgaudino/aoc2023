@@ -12,9 +12,12 @@ pub fn main() !void {
     var winningNumbers = std.AutoArrayHashMap(u16, void).init(alloc);
     defer winningNumbers.clearAndFree();
 
-    var pointsSum: u32 = 0;
+    var pointsSum: u64 = 0;
+    var totalCards: u64 = 0;
+    var cardNumber: u64 = 1;
+    var cardCounts = [_]u64{1} ** 1024;
     var linesIter = std.mem.tokenizeScalar(u8, input, '\n');
-    while (linesIter.next()) |line| {
+    while (linesIter.next()) |line| : (cardNumber += 1) {
         var headerEndIndex = std.mem.indexOfScalar(u8, line, ':');
         var dividerIndex = std.mem.indexOfScalar(u8, line, '|');
 
@@ -43,10 +46,17 @@ pub fn main() !void {
             }
         }
 
+        for (0..matches) |i| {
+            cardCounts[cardNumber + i + 1] += cardCounts[cardNumber];
+        }
+
+        totalCards += cardCounts[cardNumber];
+
         if (matches > 0) {
             pointsSum += std.math.pow(u32, 2, matches - 1);
         }
     }
 
     std.debug.print("Part One: {d}\n", .{pointsSum});
+    std.debug.print("Part Two: {d}\n", .{totalCards});
 }
