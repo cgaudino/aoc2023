@@ -1,6 +1,14 @@
 const std = @import("std");
 
 pub fn main() !void {
+    var timer = try std.time.Timer.start();
+    defer {
+        const nsElapsed = timer.read();
+        const seconds = nsElapsed / std.time.ns_per_s;
+        const ms = (nsElapsed % std.time.ns_per_s) / std.time.ns_per_ms;
+        std.debug.print("Ran in {d}sec, {d}ms\n", .{ seconds, ms });
+    }
+
     const file = try std.fs.cwd().openFile("input.txt", .{});
     defer file.close();
 
@@ -46,14 +54,34 @@ pub fn main() !void {
         const seedStart = try std.fmt.parseInt(usize, seedText, 10);
         const seedRange = try std.fmt.parseInt(usize, seedsIter.next().?, 10);
 
-        for (seedStart..(seedStart + seedRange)) |seed| {
-            const processedSeed = processSeed(@intCast(seed), &maps);
-            if (processedSeed < lowestSeedLocation) {
-                lowestSeedLocation = processedSeed;
-            }
+        const lowestInRange = findLowestInRange(seedStart, seedRange, 100_000, &maps);
+        if (lowestInRange < lowestSeedLocation) {
+            lowestSeedLocation = lowestInRange;
         }
     }
     std.debug.print("Part Two: {d}\n", .{lowestSeedLocation});
+}
+
+fn findLowestInRange(start: usize, length: usize, stride: usize, maps: *std.ArrayList(Map)) i64 {
+    var lowest: i64 = std.math.maxInt(i64);
+    var lowestIndex: usize = 0;
+    var i = start;
+    const end = start + length;
+    while (i < end) : (i += stride) {
+        const processedSeed = processSeed(@intCast(i), maps);
+        if (processedSeed < lowest) {
+            lowest = processedSeed;
+            lowestIndex = i;
+        }
+    }
+
+    if (stride == 1) {
+        return lowest;
+    }
+
+    const newStart = lowestIndex - stride;
+    const newLength = stride * 2;
+    return findLowestInRange(newStart, newLength, stride / 10, maps);
 }
 
 fn processSeed(seedNum: i64, maps: *std.ArrayList(Map)) i64 {
