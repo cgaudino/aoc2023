@@ -19,38 +19,35 @@ pub fn main() !void {
     var distanceTextBuf = try std.ArrayList(u8).initCapacity(alloc, 32);
     defer distanceTextBuf.deinit();
 
-    var partOne: usize = 1;
+    var partOne: u64 = 1;
     while (timesIter.next()) |timeText| {
         const distanceText = distancesIter.next().?;
 
-        const time = try std.fmt.parseInt(usize, timeText, 10);
-        const distance = try std.fmt.parseInt(usize, distanceText, 10);
+        const time = try std.fmt.parseFloat(f64, timeText);
+        const distance = try std.fmt.parseFloat(f64, distanceText);
+
+        partOne *= calcPossibleWins(time, distance);
 
         try timeTextBuf.appendSlice(timeText);
         try distanceTextBuf.appendSlice(distanceText);
-
-        var possibleWins: usize = 0;
-        for (1..time) |i| {
-            if (i * (time - i) > distance) {
-                possibleWins += 1;
-            }
-        }
-        partOne *= possibleWins;
     }
     std.debug.print("Part One: {d}\n", .{partOne});
 
-    var partTwo: usize = 0;
-    const longTime = try std.fmt.parseInt(usize, timeTextBuf.items, 10);
-    const longDistance = try std.fmt.parseInt(usize, distanceTextBuf.items, 10);
-    for (1..longTime) |i| {
-        if (i * (longTime - i) > longDistance) {
-            partTwo += 1;
-        }
-    }
+    const longTime = try std.fmt.parseFloat(f64, timeTextBuf.items);
+    const longDistance = try std.fmt.parseFloat(f64, distanceTextBuf.items);
+    const partTwo = calcPossibleWins(longTime, longDistance);
     std.debug.print("Part Two: {d}\n", .{partTwo});
 }
 
 fn getNumIter(line: []const u8) std.mem.TokenIterator(u8, .scalar) {
     const colonIndex = std.mem.indexOfScalar(u8, line, ':').?;
     return std.mem.tokenizeScalar(u8, line[colonIndex + 1 ..], ' ');
+}
+
+fn calcPossibleWins(time: f64, distance: f64) u64 {
+    const sqrt = @sqrt(time * time - 4.0 * (-1.0) * (-distance));
+    const solutionA = @ceil((-time + sqrt) / -2.0);
+    const solutionB = @floor((-time - sqrt) / -2.0);
+    const range: u64 = @intFromFloat(@abs((solutionA - solutionB)));
+    return range + 1;
 }
