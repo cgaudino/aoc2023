@@ -24,8 +24,8 @@ pub fn main() !void {
 
     var maps = try std.ArrayList(Map).initCapacity(alloc, 20);
     defer {
-        for (maps.items, 0..) |_, i| {
-            maps.items[i].deinit();
+        for (maps.items) |*map| {
+            map.deinit();
         }
         maps.deinit();
     }
@@ -86,8 +86,8 @@ fn findLowestInRange(start: usize, length: usize, stride: usize, maps: *std.Arra
 
 fn processSeed(seedNum: i64, maps: *std.ArrayList(Map)) i64 {
     var result = seedNum;
-    for (maps.*.items, 0..) |_, i| {
-        result = maps.*.items[i].processSeed(result);
+    for (maps.*.items) |*map| {
+        result = map.processSeed(result);
     }
     return result;
 }
