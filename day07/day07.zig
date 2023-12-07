@@ -19,14 +19,19 @@ pub fn main() !void {
         try hands.append(try Hand.parse(line));
     }
 
-    std.mem.sort(Hand, hands.items, {}, Hand.lessThan);
-
+    std.mem.sort(Hand, hands.items, false, Hand.lessThan);
     var partOne: u32 = 0;
     for (hands.items, 0..) |hand, i| {
         partOne += @intCast(hand.bid * (i + 1));
     }
-
     std.debug.print("Part One: {d}\n", .{partOne});
+
+    std.mem.sort(Hand, hands.items, true, Hand.lessThan);
+    var partTwo: u32 = 0;
+    for (hands.items, 0..) |hand, i| {
+        partTwo += @intCast(hand.bid * (i + 1));
+    }
+    std.debug.print("Part Two: {d}\n", .{partTwo});
 }
 
 const Hand = struct {
@@ -34,6 +39,7 @@ const Hand = struct {
     cards: [5]u8,
     bid: u32,
     hand_type: HandType,
+    hand_type_with_jokers: HandType,
 
     const HandType = enum(u8) {
         high_card,
@@ -51,6 +57,7 @@ const Hand = struct {
             .cards = undefined,
             .bid = try std.fmt.parseInt(u32, input[6..], 10),
             .hand_type = undefined,
+            .hand_type_with_jokers = undefined,
         };
 
         var counts = [1]u8{0} ** 15;
@@ -67,49 +74,101 @@ const Hand = struct {
             counts[hand.cards[i]] += 1;
         }
 
-        hand.hand_type = classifyHand(&counts);
+        hand.hand_type = classifyHand(&counts, false);
+        hand.hand_type_with_jokers = classifyHand(&counts, true);
 
         return hand;
     }
 
-    fn lessThan(_: void, lhs: Hand, rhs: Hand) bool {
-        if (lhs.hand_type == rhs.hand_type) {
+    fn lessThan(jokers_wild: bool, lhs: Hand, rhs: Hand) bool {
+        const l_type = if (jokers_wild) lhs.hand_type_with_jokers else lhs.hand_type;
+        const r_type = if (jokers_wild) rhs.hand_type_with_jokers else rhs.hand_type;
+
+        if (l_type == r_type) {
             for (lhs.cards, rhs.cards) |l, r| {
                 if (l != r) {
+                    if (jokers_wild) {
+                        if (l == 11) {
+                            return r != 11;
+                        }
+                        if (r == 11) {
+                            return false;
+                        }
+                    }
                     return l < r;
                 }
             }
         }
-        return @intFromEnum(lhs.hand_type) < @intFromEnum(rhs.hand_type);
+        return @intFromEnum(l_type) < @intFromEnum(r_type);
     }
 
-    fn classifyHand(counts: []u8) HandType {
+    fn classifyHand(counts: []u8, jokers_wild: bool) HandType {
         var numTrips: usize = 0;
         var numPairs: usize = 0;
+        var numJokers: usize = if (jokers_wild) counts[11] else 0;
 
-        for (counts) |count| {
+        for (counts, 0..) |count, i| {
+            if (jokers_wild and i == 11) {
+                continue;
+            }
+
             switch (count) {
                 5 => return .five_of_a_kind,
-                4 => return .four_of_a_kind,
+                4 => return if (numJokers > 0) .five_of_a_kind else .four_of_a_kind,
                 3 => numTrips += 1,
                 2 => numPairs += 1,
-                else => continue,
+                else => {},
             }
         }
 
-        if (numTrips == 1) {
-            return switch (numPairs) {
-                1 => .full_house,
-                0 => .three_of_a_kind,
-                else => undefined,
-            };
+        switch (numTrips) {
+            1 => {
+                switch (numPairs) {
+                    1 => return .full_house,
+                    0 => return switch (numJokers) {
+                        2 => .five_of_a_kind,
+                        1 => .four_of_a_kind,
+                        0 => .three_of_a_kind,
+                        else => unreachable,
+                    },
+                    else => unreachable,
+                }
+            },
+            0 => {},
+            else => unreachable,
         }
 
-        return switch (numPairs) {
-            2 => .two_pair,
-            1 => .one_pair,
-            0 => .high_card,
-            else => undefined,
-        };
+        switch (numPairs) {
+            2 => {
+                return switch (numJokers) {
+                    1 => return .full_house,
+                    0 => return .two_pair,
+                    else => unreachable,
+                };
+            },
+            1 => {
+                return switch (numJokers) {
+                    3 => return .five_of_a_kind,
+                    2 => return .four_of_a_kind,
+                    1 => return .three_of_a_kind,
+                    0 => return .one_pair,
+                    else => unreachable,
+                };
+            },
+            0 => {
+                return switch (numJokers) {
+                    5 => return .five_of_a_kind,
+                    4 => return .five_of_a_kind,
+                    3 => return .four_of_a_kind,
+                    2 => return .three_of_a_kind,
+                    1 => return .one_pair,
+                    0 => return .high_card,
+                    else => unreachable,
+                };
+            },
+            else => unreachable,
+        }
+
+        unreachable;
     }
 };
