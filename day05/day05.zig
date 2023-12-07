@@ -12,7 +12,9 @@ pub fn main() !void {
     const file = try std.fs.cwd().openFile("input.txt", .{});
     defer file.close();
 
-    const alloc = std.heap.page_allocator;
+    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
+    const alloc = gpa.allocator();
+    defer _ = gpa.deinit();
 
     const input = try file.readToEndAlloc(alloc, std.math.maxInt(u16));
     defer alloc.free(input);
