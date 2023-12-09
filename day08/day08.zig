@@ -48,6 +48,46 @@ pub fn main() !void {
     }
 
     std.debug.print("Part One: {d}\n", .{instructionIndex});
+
+    var currentNodes = std.ArrayList(*Node).init(alloc);
+    defer currentNodes.deinit();
+    var nodeSteps = std.ArrayList(usize).init(alloc);
+    defer nodeSteps.deinit();
+
+    for (nodeCache.keys()) |key| {
+        if (key[2] == 'A') {
+            try currentNodes.append(nodeCache.getPtr(key).?);
+            try nodeSteps.append(0);
+        }
+    }
+
+    instructionIndex = 0;
+    var foundNodes: usize = 0;
+    while (currentNodes.items.len > 0) : (instructionIndex += 1) {
+        const dir: usize = switch (directions[instructionIndex % directions.len]) {
+            'L' => 0,
+            'R' => 1,
+            else => unreachable,
+        };
+
+        for (currentNodes.items, 0..) |node, i| {
+            if (node.children[dir] == null) {
+                node.children[dir] = nodeCache.getPtr(node.children_names[dir]).?;
+            }
+            currentNodes.items[i] = node.children[dir].?;
+
+            if (nodeSteps.items[i] == 0 and currentNodes.items[i].name[2] == 'Z') {
+                nodeSteps.items[i] = instructionIndex + 1;
+                foundNodes += 1;
+            }
+        }
+
+        if (foundNodes == currentNodes.items.len) {
+            break;
+        }
+    }
+
+    std.debug.print("Part Two: {d}\n", .{leastCommonMultipleSlice(usize, nodeSteps.items)});
 }
 
 const Node = struct {
@@ -56,3 +96,26 @@ const Node = struct {
     children: [2]?*Node = .{ null, null },
     children_names: [2][]const u8,
 };
+
+fn greatestCommonFactor(comptime T: type, a: T, b: T) T {
+    var _a = a;
+    var _b = b;
+    while (_b != 0) {
+        var temp = _b;
+        _b = _a % _b;
+        _a = temp;
+    }
+    return _a;
+}
+
+fn leastCommonMultiple(comptime T: type, a: T, b: T) T {
+    return (a / greatestCommonFactor(T, a, b)) * b;
+}
+
+fn leastCommonMultipleSlice(comptime T: type, items: []T) T {
+    var result: T = 1;
+    for (items) |item| {
+        result = leastCommonMultiple(T, result, item);
+    }
+    return result;
+}
