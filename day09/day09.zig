@@ -24,27 +24,25 @@ pub fn main() !void {
         while (numIter.next()) |num| {
             try numbers.append(try std.fmt.parseInt(i64, num, 10));
         }
-
-        partOneSum += try extrapolate(i64, numbers.items, arenaAlloc, false);
-        partTwoSum += try extrapolate(i64, numbers.items, arenaAlloc, true);
+        const extrapolations = try extrapolate(numbers.items, arenaAlloc);
+        partOneSum += extrapolations.end;
+        partTwoSum += extrapolations.start;
 
         _ = arena.reset(.retain_capacity);
     }
     std.debug.print("Part One: {d}\nPart Two: {d}\n", .{ partOneSum, partTwoSum });
 }
 
-fn extrapolate(comptime T: type, numbers: []T, allocator: std.mem.Allocator, comptime reverse: bool) !T {
-    if (std.mem.allEqual(T, numbers, 0)) {
-        return 0;
+fn extrapolate(numbers: []i64, allocator: std.mem.Allocator) !struct { start: i64, end: i64 } {
+    if (std.mem.allEqual(i64, numbers, 0)) {
+        return .{ .start = 0, .end = 0 };
     }
 
-    var diffs: []T = try allocator.alloc(T, numbers.len - 1);
+    var diffs = try allocator.alloc(i64, numbers.len - 1);
     for (diffs, 0..) |_, i| {
         diffs[i] = numbers[i + 1] - numbers[i];
     }
 
-    if (reverse) {
-        return numbers[0] - try extrapolate(T, diffs, allocator, reverse);
-    }
-    return numbers[numbers.len - 1] + try extrapolate(T, diffs, allocator, reverse);
+    const next = try extrapolate(diffs, allocator);
+    return .{ .start = numbers[0] - next.start, .end = numbers[numbers.len - 1] + next.end };
 }
