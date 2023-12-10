@@ -53,7 +53,6 @@ pub fn main() !void {
                 interiorTiles += 1;
             }
         }
-        std.debug.print("\n", .{});
         scannedTiles += line.len + 1;
     }
     std.debug.print("Part Two: {d}\n", .{interiorTiles});
