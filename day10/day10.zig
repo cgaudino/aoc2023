@@ -14,15 +14,49 @@ pub fn main() !void {
     const gridWidth = std.mem.indexOfScalar(u8, input, '\n').? + 1;
     const startPosition = std.mem.indexOfScalar(u8, input, 'S').?;
 
+    var mainLoopTiles = std.AutoHashMap(usize, void).init(alloc);
+    defer mainLoopTiles.deinit();
+    try mainLoopTiles.put(startPosition, {});
+
+    const firstDir = findFirstMove(startPosition, gridWidth, input);
+    var direction = firstDir;
     var position = startPosition;
-    var direction = findFirstMove(startPosition, gridWidth, input);
     var iterations: usize = 0;
     while (position != startPosition or iterations == 0) : (iterations += 1) {
         position = try doMove(position, direction, gridWidth);
         direction = getNewDirection(direction, input[position]);
-    }
 
+        try mainLoopTiles.put(position, {});
+    }
     std.debug.print("Part One: {d}\n", .{iterations / 2});
+
+    var linesIter = std.mem.tokenizeScalar(u8, input, '\n');
+    var scannedTiles: usize = 0;
+    var interiorTiles: usize = 0;
+    var verticalPipes: usize = 0;
+    while (linesIter.next()) |line| {
+        verticalPipes = 0;
+        for (line, 0..) |tile, i| {
+            if (mainLoopTiles.contains(i + scannedTiles)) {
+                switch (tile) {
+                    '|', 'J', 'L' => {
+                        verticalPipes += 1;
+                    },
+                    'S' => {
+                        if (firstDir == .up or firstDir == .down) {
+                            verticalPipes += 1;
+                        }
+                    },
+                    else => {},
+                }
+            } else if (verticalPipes % 2 != 0) {
+                interiorTiles += 1;
+            }
+        }
+        std.debug.print("\n", .{});
+        scannedTiles += line.len + 1;
+    }
+    std.debug.print("Part Two: {d}\n", .{interiorTiles});
 }
 
 const Direction = enum { up, down, left, right, invalid };
@@ -42,7 +76,7 @@ fn doMove(position: usize, dir: Direction, gridWidth: usize) !usize {
 }
 
 fn findFirstMove(startPosition: usize, gridWidth: usize, map: []const u8) Direction {
-    const candidates = [4]Direction{ .left, .right, .up, .down };
+    const candidates = [4]Direction{ .up, .down, .left, .right };
 
     for (candidates) |candidate| {
         const testPosition = doMove(startPosition, candidate, gridWidth) catch {
