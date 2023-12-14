@@ -11,9 +11,11 @@ pub fn main() !void {
     const input = try file.readToEndAlloc(alloc, std.math.maxInt(u16));
     defer alloc.free(input);
 
-    var groupsBuffer: [32]u32 = .{1} ** 32;
-    var unfoldBuffer: []u8 = try alloc.alloc(u8, 2048);
-    defer alloc.free(unfoldBuffer);
+    var groupsBuffer: []u32 = try alloc.alloc(u32, 32);
+    defer alloc.free(groupsBuffer);
+    var springsBuffer: []u8 = try alloc.alloc(u8, 2048);
+    defer alloc.free(springsBuffer);
+
     var cache = std.AutoHashMap(Query, u64).init(alloc);
     defer cache.deinit();
 
@@ -22,25 +24,25 @@ pub fn main() !void {
     var partTwo: u64 = 0;
     while (linesIter.next()) |line| {
         cache.clearRetainingCapacity();
-        partOne += try processLine(line, unfoldBuffer, &groupsBuffer, &cache, 1);
+        partOne += try processLine(line, springsBuffer, groupsBuffer, &cache, 1);
         cache.clearRetainingCapacity();
-        partTwo += try processLine(line, unfoldBuffer, &groupsBuffer, &cache, 5);
+        partTwo += try processLine(line, springsBuffer, groupsBuffer, &cache, 5);
     }
     std.debug.print("Part One: {d}\nPart Two: {d}\n", .{ partOne, partTwo });
 }
 
-fn processLine(line: []const u8, unfoldBuffer: []u8, buffer: []u32, cache: *std.AutoHashMap(Query, u64), foldCount: usize) !u64 {
+fn processLine(line: []const u8, springsBuffer: []u8, groupsBuffer: []u32, cache: *std.AutoHashMap(Query, u64), foldCount: usize) !u64 {
     const separatorIndex = std.mem.indexOfScalar(u8, line, ' ').?;
-    const springs = unfold(u8, line[0..separatorIndex], unfoldBuffer, '?', foldCount);
+    const springs = unfold(u8, line[0..separatorIndex], springsBuffer, '?', foldCount);
 
     var groupsIter = std.mem.tokenizeScalar(u8, line[(separatorIndex + 1)..], ',');
     var groupCount: usize = 0;
     while (groupsIter.next()) |group| {
-        buffer[groupCount] = try std.fmt.parseInt(u32, group, 10);
+        groupsBuffer[groupCount] = try std.fmt.parseInt(u32, group, 10);
         groupCount += 1;
     }
 
-    var groups = unfold(u32, buffer[0..groupCount], buffer, null, foldCount);
+    var groups = unfold(u32, groupsBuffer[0..groupCount], groupsBuffer, null, foldCount);
 
     const query = .{ .springIndex = 0, .groupIndex = 0, .groupSize = 0, .inGroup = false, .replacementChar = null };
     const result = findValidConfigurations(query, springs, groups, cache);
