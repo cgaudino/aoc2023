@@ -1,6 +1,12 @@
 const std = @import("std");
 
 pub fn main() !void {
+    var timer = try std.time.Timer.start();
+    defer {
+        const elapsed: f64 = @floatFromInt(timer.read());
+        std.debug.print("Finished in {d}ms\n", .{elapsed / std.time.ns_per_ms});
+    }
+
     const file = try std.fs.cwd().openFile("input.txt", .{});
     defer file.close();
 
@@ -14,64 +20,94 @@ pub fn main() !void {
     var modules = std.StringHashMap(Module).init(allocator);
     defer modules.deinit();
 
+    // Must preallocate enough space for all modules. If map is allowed to grow, ptrs between
+    // modules will be invalidated.
+    try modules.ensureTotalCapacity(100);
+
     var lineIter = std.mem.tokenizeScalar(u8, input, '\n');
     while (lineIter.next()) |line| {
-        const module = try Module.parse(line);
-        try modules.put(module.getName(), module);
+        try Module.init(line, &modules);
     }
 
     var keysIter = modules.keyIterator();
     while (keysIter.next()) |key| {
         var module = modules.getPtr(key.*).?;
-        const destinationCount = module.getDestinationCount();
-        for (0..destinationCount) |i| {
-            const destinationName = module.getDestinations()[i];
-            if (modules.getPtr(destinationName)) |target| {
-                target.addInput(module.getName());
-            }
-        }
+        try module.connectDestinations(&modules);
     }
 
-    var pulses = PulseQueue.init(allocator);
+    var pulses = try PulseQueue.init(allocator);
     defer pulses.deinit();
-    for (0..1000) |_| {
-        try pulses.addPulse(.{ .high = false, .source = "button", .destination = "broadcaster" });
-        while (pulses.len() > 0) {
-            const pulse = pulses.popPulse();
-            if (modules.getPtr(pulse.destination)) |module| {
-                try module.processPulse(pulse, &pulses);
+
+    var broadcaster = modules.getPtr("broadcaster").?;
+    var counter = modules.getPtr("rx").?;
+    var counterInput: *Module = counter.logic.counter.input;
+    var counterInputs: *std.SegmentedList(*Module, Module.CONNECTION_LIMIT * 2) = &(counterInput.*.logic.conjunction.inputs);
+    while (true) : (buttonPresses += 1) {
+        try pulses.addPulse(.{ .high = false, .source = broadcaster, .destination = broadcaster });
+        while (pulses.popPulse()) |pulse| {
+            try pulse.destination.processPulse(pulse, &pulses);
+        }
+
+        if (buttonPresses == 1000) {
+            std.debug.print("Part One: {d}\n", .{pulses.lowPulseCount * pulses.highPulseCount});
+        }
+
+        var allConditionsMet = buttonPresses > 1000;
+        for (0..counterInputs.*.count()) |i| {
+            if (counterInputs.*.at(i).*.logic.conjunction.firstHighPress == null) {
+                allConditionsMet = false;
             }
+        }
+
+        if (allConditionsMet) {
+            break;
         }
     }
 
-    std.debug.print("Part One: {d}\n", .{pulses.lowPulseCount * pulses.highPulseCount});
+    var partTwo: usize = 1;
+    for (0..counterInputs.*.count()) |i| {
+        partTwo *= counterInputs.*.at(i).*.logic.conjunction.firstHighPress.?;
+    }
+    std.debug.print("Part Two: {d}\n", .{partTwo});
 }
 
+var buttonPresses: usize = 1;
+
 const Pulse = struct {
-    source: []const u8,
-    destination: []const u8,
+    source: *Module,
+    destination: *Module,
     high: bool,
 };
 
 const PulseQueue = struct {
-    pulses: std.ArrayList(Pulse),
+    buffer: []Pulse,
+    head: usize,
+    tail: usize,
     lowPulseCount: usize,
     highPulseCount: usize,
+    allocator: std.mem.Allocator,
 
-    fn init(allocator: std.mem.Allocator) PulseQueue {
+    const PULSE_LIMIT = 2048;
+
+    fn init(allocator: std.mem.Allocator) !PulseQueue {
         return .{
-            .pulses = std.ArrayList(Pulse).init(allocator),
+            .buffer = try allocator.alloc(Pulse, PULSE_LIMIT),
+            .head = 0,
+            .tail = 0,
             .lowPulseCount = 0,
             .highPulseCount = 0,
+            .allocator = allocator,
         };
     }
 
     fn deinit(self: *PulseQueue) void {
-        self.pulses.deinit();
+        self.allocator.free(self.buffer);
     }
 
     fn addPulse(self: *PulseQueue, pulse: Pulse) !void {
-        try self.pulses.insert(0, pulse);
+        self.buffer[self.tail] = pulse;
+        self.tail = (self.tail + 1) % PULSE_LIMIT;
+
         if (pulse.high) {
             self.highPulseCount += 1;
         } else {
@@ -79,170 +115,187 @@ const PulseQueue = struct {
         }
     }
 
-    fn popPulse(self: *PulseQueue) Pulse {
-        return self.pulses.pop();
-    }
-
-    fn len(self: *const PulseQueue) usize {
-        return self.pulses.items.len;
+    fn popPulse(self: *PulseQueue) ?Pulse {
+        if (self.head != self.tail) {
+            const prevHead = self.head;
+            self.head = (self.head + 1) % PULSE_LIMIT;
+            return self.buffer[prevHead];
+        }
+        return null;
     }
 };
 
-const Module = union(enum) {
-    flipFlop: FlipFlop,
-    broadcaster: Broadcaster,
-    conjunction: Conjunction,
+const Module = struct {
+    name: []const u8,
+    destinationsText: []const u8,
+    destinations: std.SegmentedList(*Module, CONNECTION_LIMIT) = undefined,
+    logic: ModuleLogic,
 
-    fn parse(text: []const u8) !Module {
+    const CONNECTION_LIMIT = 8;
+
+    fn init(text: []const u8, modules: *std.StringHashMap(Module)) !void {
         var splitIter = std.mem.splitSequence(u8, text, " -> ");
 
         const moduleName = splitIter.next().?;
         const destinations = splitIter.next().?;
 
-        const broadcasterName = "broadcaster";
-        if (std.mem.eql(u8, moduleName, broadcasterName)) {
-            return try Broadcaster.init(moduleName, destinations);
+        const logicResult = ModuleLogic.init(moduleName);
+
+        var entry = try modules.getOrPut(logicResult.name);
+        entry.value_ptr.* = .{
+            .name = logicResult.name,
+            .destinationsText = destinations,
+            .destinations = .{},
+            .logic = logicResult.logic,
+        };
+    }
+
+    fn processPulse(self: *Module, pulse: Pulse, queue: *PulseQueue) !void {
+        if (self.logic.processPulse(pulse)) |high| {
+            for (0..self.destinations.count()) |i| {
+                try queue.addPulse(.{
+                    .high = high,
+                    .source = self,
+                    .destination = self.destinations.at(i).*,
+                });
+            }
         }
-        switch (text[0]) {
+    }
+
+    fn connectDestinations(self: *Module, modules: *std.StringHashMap(Module)) !void {
+        var buf = [0]u8{};
+        var fba = std.heap.FixedBufferAllocator.init(&buf);
+        var allocator = fba.allocator();
+
+        var destinationIter = std.mem.tokenizeAny(u8, self.destinationsText, " ,");
+        while (destinationIter.next()) |destinationName| {
+            var entry = try modules.getOrPut(destinationName);
+            if (!entry.found_existing) {
+                entry.value_ptr.* = .{
+                    .name = destinationName,
+                    .destinationsText = "",
+                    .destinations = .{},
+                    .logic = .{ .counter = .{ .input = self } },
+                };
+            }
+            var ptr = try self.destinations.addOne(allocator);
+            ptr.* = entry.value_ptr;
+
+            try ptr.*.logic.addInput(self.name, modules);
+        }
+    }
+};
+
+const ModuleLogic = union(enum) {
+    flipFlop: FlipFlop,
+    broadcaster: Broadcaster,
+    conjunction: Conjunction,
+    counter: Counter,
+
+    fn init(name: []const u8) struct { logic: ModuleLogic, name: []const u8 } {
+        const broadcasterName = "broadcaster";
+        if (std.mem.eql(u8, name, broadcasterName)) {
+            return .{ .logic = .{ .conjunction = .{} }, .name = name };
+        }
+        switch (name[0]) {
             '%' => {
-                return try FlipFlop.init(moduleName[1..], destinations);
+                return .{ .logic = .{ .flipFlop = .{} }, .name = name[1..] };
             },
             '&' => {
-                return try Conjunction.init(moduleName[1..], destinations);
+                return .{ .logic = .{ .conjunction = .{} }, .name = name[1..] };
             },
             else => unreachable,
         }
     }
 
-    fn processPulse(self: *Module, pulse: Pulse, queue: *PulseQueue) !void {
+    fn processPulse(self: *ModuleLogic, pulse: Pulse) ?bool {
         return switch (self.*) {
-            inline else => |*m| m.processPulse(pulse, queue),
+            inline else => |*m| m.processPulse(pulse),
         };
     }
 
-    fn getName(self: *const Module) []const u8 {
-        return switch (self.*) {
-            inline else => |m| m.name,
-        };
-    }
-
-    fn getDestinations(self: *const Module) []const []const u8 {
-        return switch (self.*) {
-            inline else => |m| m.destinationNames[0..m.destinationCount],
-        };
-    }
-
-    fn getDestinationCount(self: *const Module) usize {
-        return switch (self.*) {
-            inline else => |m| m.destinationCount,
-        };
-    }
-
-    fn addInput(self: *Module, input: []const u8) void {
-        return switch (self.*) {
-            .conjunction => |*c| c.addInput(input),
-            inline else => {},
-        };
-    }
-
-    fn parseDestinations(destinations: []const u8, array: [*][]const u8, count: *usize) void {
-        var iter = std.mem.tokenizeAny(u8, destinations, " ,");
-        while (iter.next()) |destination| {
-            array[count.*] = destination;
-            count.* += 1;
+    fn addInput(self: *ModuleLogic, input: []const u8, modules: *std.StringHashMap(Module)) !void {
+        switch (self.*) {
+            inline else => |*m| {
+                if (@hasDecl(@TypeOf(m.*), "addInput")) {
+                    try m.addInput(input, modules);
+                }
+            },
         }
     }
 };
 
 const Broadcaster = struct {
-    name: []const u8,
-    destinationNames: [10][]const u8 = undefined,
-    destinationCount: usize = 0,
-
-    fn init(name: []const u8, destinations: []const u8) !Module {
-        var broadcaster = Broadcaster{ .name = name };
-        Module.parseDestinations(destinations, &broadcaster.destinationNames, &broadcaster.destinationCount);
-        return .{ .broadcaster = broadcaster };
-    }
-
-    fn processPulse(self: *const Broadcaster, pulse: Pulse, queue: *PulseQueue) !void {
-        for (0..self.destinationCount) |i| {
-            try queue.addPulse(.{
-                .high = pulse.high,
-                .source = self.name,
-                .destination = self.destinationNames[i],
-            });
-        }
+    fn processPulse(_: *const Broadcaster, pulse: Pulse) ?bool {
+        return pulse.high;
     }
 };
 
 const FlipFlop = struct {
-    name: []const u8,
-    destinationNames: [10][]const u8 = undefined,
-    destinationCount: usize = 0,
     state: bool = false,
 
-    fn init(name: []const u8, destinations: []const u8) !Module {
-        var flipflop = FlipFlop{ .name = name };
-        Module.parseDestinations(destinations, &flipflop.destinationNames, &flipflop.destinationCount);
-        return .{ .flipFlop = flipflop };
-    }
-
-    fn processPulse(self: *FlipFlop, pulse: Pulse, queue: *PulseQueue) !void {
+    fn processPulse(self: *FlipFlop, pulse: Pulse) ?bool {
         if (pulse.high) {
-            return;
+            return null;
         }
 
         self.state = !self.state;
-        for (0..self.destinationCount) |i| {
-            try queue.addPulse(.{
-                .high = self.state,
-                .source = self.name,
-                .destination = self.destinationNames[i],
-            });
-        }
+        return self.state;
     }
 };
 
 const Conjunction = struct {
-    name: []const u8,
-    destinationNames: [10][]const u8 = undefined,
-    destinationCount: usize = 0,
-    inputNames: [10][]const u8 = undefined,
-    inputState: [10]bool = [1]bool{false} ** 10,
-    inputCount: usize = 0,
+    inputs: std.SegmentedList(*Module, Module.CONNECTION_LIMIT * 2) = .{},
+    inputStates: std.SegmentedList(bool, Module.CONNECTION_LIMIT * 2) = .{},
+    firstHighPress: ?usize = null,
 
-    fn init(name: []const u8, destinations: []const u8) !Module {
-        var conjunction = Conjunction{ .name = name };
-        Module.parseDestinations(destinations, &conjunction.destinationNames, &conjunction.destinationCount);
-        return .{ .conjunction = conjunction };
-    }
-
-    fn processPulse(self: *Conjunction, pulse: Pulse, queue: *PulseQueue) !void {
+    fn processPulse(self: *Conjunction, pulse: Pulse) ?bool {
         var allHigh: bool = true;
-        for (0..self.inputCount) |i| {
-            if (std.mem.eql(u8, pulse.source, self.inputNames[i])) {
-                self.inputState[i] = pulse.high;
+        for (0..self.inputs.count()) |i| {
+            if (pulse.source == self.inputs.at(i).*) {
+                self.inputStates.at(i).* = pulse.high;
             }
-            allHigh = allHigh and self.inputState[i];
+            allHigh = allHigh and self.inputStates.at(i).*;
         }
-        for (0..self.destinationCount) |i| {
-            try queue.addPulse(.{
-                .high = !allHigh,
-                .source = self.name,
-                .destination = self.destinationNames[i],
-            });
+
+        if (!allHigh and self.firstHighPress == null) {
+            self.firstHighPress = buttonPresses;
         }
+
+        return !allHigh;
     }
 
-    fn addInput(self: *Conjunction, input: []const u8) void {
-        for (0..self.inputCount) |i| {
-            if (std.mem.eql(u8, self.inputNames[i], input)) {
+    fn addInput(self: *Conjunction, input: []const u8, modules: *std.StringHashMap(Module)) !void {
+        const inputPtr = modules.getPtr(input).?;
+        for (0..self.inputs.count()) |i| {
+            if (self.inputs.at(i).* == inputPtr) {
                 return;
             }
         }
-        self.inputNames[self.inputCount] = input;
-        self.inputState[self.inputCount] = false;
-        self.inputCount += 1;
+
+        var buf = [0]u8{};
+        var fba = std.heap.FixedBufferAllocator.init(&buf);
+        var allocator = fba.allocator();
+
+        var n = try self.inputs.addOne(allocator);
+        n.* = inputPtr;
+
+        var s = try self.inputStates.addOne(allocator);
+        s.* = false;
+    }
+};
+
+const Counter = struct {
+    high: usize = 0,
+    low: usize = 0,
+    input: *Module = undefined,
+
+    fn processPulse(self: *Counter, pulse: Pulse) ?bool {
+        if (pulse.high) {
+            self.high += 1;
+        } else {
+            self.low += 1;
+        }
+        return false;
     }
 };
