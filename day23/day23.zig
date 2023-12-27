@@ -20,10 +20,14 @@ pub fn main() !void {
 
     const startIndex = std.mem.indexOfScalar(u8, input, '.').?;
     const startPos = indexToPos(startIndex, gridSize);
+    const endIndex = std.mem.lastIndexOfScalar(u8, input, '.').?;
+    const endPos = indexToPos(endIndex, gridSize);
 
-    const longestPath = try findLongestPath(input, gridSize, startPos, &visited, 0, 0);
+    const partOne = try findLongestPath(input, gridSize, startPos, endPos, &visited, 0, false);
+    std.debug.print("Part One: {d}\n", .{partOne});
 
-    std.debug.print("Part One: {d}\n", .{longestPath});
+    const partTwo = try findLongestPath(input, gridSize, startPos, endPos, &visited, 0, true);
+    std.debug.print("Part Two: {d}\n", .{partTwo});
 }
 
 const Vec2 = @Vector(2, isize);
@@ -40,49 +44,91 @@ fn indexToPos(i: usize, gridSize: Vec2) Vec2 {
     return Vec2{ @mod(signedIndex, (gridSize[0] + 1)), @divFloor(signedIndex, (gridSize[0] + 1)) };
 }
 
-fn findLongestPath(grid: []const u8, gridSize: Vec2, pos: Vec2, visited: *std.AutoHashMap(Vec2, void), currentLength: usize, maxLength: usize) !usize {
-    try visited.put(pos, {});
-
+fn findLongestPath(
+    grid: []const u8,
+    gridSize: Vec2,
+    pos: Vec2,
+    target: Vec2,
+    visited: *std.AutoHashMap(Vec2, void),
+    currentLength: usize,
+    climbSlopes: bool,
+) !usize {
     var buffer: [4]Vec2 = [_]Vec2{.{ 0, 0 }} ** 4;
+    var maxLength: usize = 0;
+    try visited.put(pos, {});
+    defer _ = visited.remove(pos);
 
-    var newMaxLength = maxLength;
-
-    if (getTraversableNeighbors(pos, grid, gridSize, &buffer)) |neighbors| {
+    if (getTraversableNeighbors(pos, grid, gridSize, &buffer, visited, climbSlopes)) |neighbors| {
         for (neighbors) |neighbor| {
-            if (visited.contains(neighbor)) {
-                continue;
-            }
-            const result = try findLongestPath(grid, gridSize, neighbor, visited, currentLength + 1, @max(currentLength + 1, maxLength));
-            newMaxLength = @max(result, newMaxLength);
+            const result = try findLongestPath(grid, gridSize, neighbor, target, visited, currentLength + 1, climbSlopes);
+            maxLength = @max(result, maxLength);
         }
+        return maxLength;
+    } else if (@reduce(.And, pos == target)) {
+        return currentLength;
     }
-    _ = visited.remove(pos);
-    return newMaxLength;
+
+    return 0;
 }
 
-fn getTraversableNeighbors(pos: Vec2, grid: []const u8, gridSize: Vec2, buffer: *[4]Vec2) ?[]Vec2 {
+fn getTraversableNeighbors(
+    pos: Vec2,
+    grid: []const u8,
+    gridSize: Vec2,
+    buffer: *[4]Vec2,
+    visited: *std.AutoHashMap(Vec2, void),
+    climbSlopes: bool,
+) ?[]Vec2 {
     const up = Vec2{ 0, -1 };
     const down = Vec2{ 0, 1 };
     const left = Vec2{ -1, 0 };
     const right = Vec2{ 1, 0 };
-    const directions = [_]Vec2{ up, down, left, right };
+    const directions = [_]Vec2{ down, right, left, up };
 
     var curIndex = posToIndex(pos, gridSize) orelse return null;
 
+    if (climbSlopes) {
+        var i: usize = 0;
+        for (directions) |direction| {
+            const neighbor = pos + direction;
+            if (visited.contains(neighbor)) {
+                continue;
+            }
+            const neighborIndex = posToIndex(neighbor, gridSize) orelse continue;
+            if (grid[neighborIndex] != '#') {
+                buffer[i] = neighbor;
+                i += 1;
+            }
+        }
+        return if (i > 0) buffer[0..i] else null;
+    }
+
     switch (grid[curIndex]) {
         '>' => {
+            if (visited.contains(pos + right)) {
+                return null;
+            }
             buffer[0] = pos + right;
             return buffer[0..1];
         },
         '<' => {
+            if (visited.contains(pos + left)) {
+                return null;
+            }
             buffer[0] = pos + left;
             return buffer[0..1];
         },
         'v' => {
+            if (visited.contains(pos + down)) {
+                return null;
+            }
             buffer[0] = pos + down;
             return buffer[0..1];
         },
         '^' => {
+            if (visited.contains(pos + up)) {
+                return null;
+            }
             buffer[0] = pos + up;
             return buffer[0..1];
         },
@@ -90,6 +136,9 @@ fn getTraversableNeighbors(pos: Vec2, grid: []const u8, gridSize: Vec2, buffer: 
             var i: usize = 0;
             for (directions) |direction| {
                 const neighbor = pos + direction;
+                if (visited.contains(neighbor)) {
+                    continue;
+                }
                 const neighborIndex = posToIndex(neighbor, gridSize) orelse continue;
                 if (grid[neighborIndex] != '#') {
                     buffer[i] = neighbor;
