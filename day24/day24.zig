@@ -32,6 +32,12 @@ pub fn main() !void {
         }
     }
     std.debug.print("Part One: {d}\n", .{sum});
+
+    var ps: [3]Projectile = undefined;
+    findIndependentProjectiles(projectiles.items, &ps);
+    const partTwo = findRock(&ps);
+
+    std.debug.print("Part Two: {d}\n", .{partTwo});
 }
 
 const Vec3 = @Vector(3, f64);
@@ -76,4 +82,86 @@ fn isInPast(a: Projectile, b: *[2]f64) bool {
     const x = a.pos[0] + a.vel[0];
     const y = a.pos[1] + a.vel[1];
     return @abs(x - b[0]) + @abs(y - b[1]) > @abs(a.pos[0] - b[0]) + @abs(a.pos[1] - b[1]);
+}
+
+fn dot(a: Vec3, b: Vec3) f64 {
+    return a[0] * b[0] + a[1] * b[1] + a[2] * b[2];
+}
+
+fn cross(a: Vec3, b: Vec3) Vec3 {
+    return Vec3{
+        a[1] * b[2] - a[2] * b[1],
+        a[2] * b[0] - a[0] * b[2],
+        a[0] * b[1] - a[1] * b[0],
+    };
+}
+
+fn lerp(r: f64, a: Vec3, s: f64, b: Vec3, t: f64, c: Vec3) Vec3 {
+    return .{
+        r * a[0] + s * b[0] + t * c[0],
+        r * a[1] + s * b[1] + t * c[1],
+        r * a[2] + s * b[2] + t * c[2],
+    };
+}
+
+fn independent(a: Vec3, b: Vec3) bool {
+    return @reduce(.Or, cross(a, b) != @as(Vec3, @splat(0)));
+}
+
+fn toPlane(a: Projectile, b: Projectile) struct { normal: Vec3, distance: f64 } {
+    const p = a.pos - b.pos;
+    const v = a.vel - b.vel;
+    const c = cross(a.vel, b.vel);
+    return .{
+        .normal = cross(p, v),
+        .distance = dot(p, c),
+    };
+}
+
+fn findIndependentProjectiles(projectiles: []Projectile, buffer: *[3]Projectile) void {
+    buffer[0] = projectiles[0];
+    var i: usize = 1;
+    for (projectiles) |other| {
+        if (i == 1 and independent(buffer[0].vel, other.vel)) {
+            buffer[i] = other;
+            i += 1;
+            continue;
+        }
+        if (i == 2 and independent(buffer[0].vel, other.vel) and independent(buffer[1].vel, other.vel)) {
+            buffer[i] = other;
+            break;
+        }
+    }
+}
+
+fn findRock(projectiles: *[3]Projectile) f64 {
+    const planeA = toPlane(projectiles[0], projectiles[1]);
+    const planeB = toPlane(projectiles[0], projectiles[2]);
+    const planeC = toPlane(projectiles[1], projectiles[2]);
+
+    const t = dot(planeA.normal, cross(planeB.normal, planeC.normal));
+    var w = lerp(
+        planeA.distance,
+        cross(planeB.normal, planeC.normal),
+        planeB.distance,
+        cross(planeC.normal, planeA.normal),
+        planeC.distance,
+        cross(planeA.normal, planeB.normal),
+    );
+    w[0] = @round(w[0] / t);
+    w[1] = @round(w[1] / t);
+    w[2] = @round(w[2] / t);
+
+    const w1 = projectiles[0].vel - w;
+    const w2 = projectiles[1].vel - w;
+    const ww = cross(w1, w2);
+
+    const a = dot(ww, cross(projectiles[1].pos, w2));
+    const b = dot(ww, cross(projectiles[0].pos, w1));
+    const c = dot(projectiles[0].pos, ww);
+    const d = dot(ww, ww);
+
+    const rock = lerp(a, w1, -b, w2, c, ww);
+
+    return @reduce(.Add, rock) / d;
 }
