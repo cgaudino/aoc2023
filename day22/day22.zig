@@ -30,11 +30,16 @@ pub fn main() !void {
         try brick.fall(bricks.items[0..i]);
     }
 
+    var affectedBricks = std.AutoHashMap(*Brick, void).init(allocator);
+    defer affectedBricks.deinit();
+
     var partOne: usize = 0;
-    for (bricks.items) |brick| {
+    var partTwo: usize = 0;
+    for (bricks.items) |*brick| {
         var canDissolve = true;
-        for (brick.supports.items) |other| {
-            if (other.supportedBy.items.len == 1) {
+        var supportsIter = brick.supports.constIterator(0);
+        while (supportsIter.next()) |other| {
+            if (other.*.supportedBy.count() == 1) {
                 canDissolve = false;
                 break;
             }
@@ -42,9 +47,13 @@ pub fn main() !void {
         if (canDissolve) {
             partOne += 1;
         }
+
+        affectedBricks.clearRetainingCapacity();
+        try addAffectedBricks(brick, &affectedBricks);
+        partTwo += affectedBricks.count();
     }
 
-    std.debug.print("Part One: {d}\n", .{partOne});
+    std.debug.print("Part One: {d}\nPart Two: {d}\n", .{ partOne, partTwo });
 }
 
 const Vec3 = @Vector(3, isize);
@@ -56,13 +65,15 @@ const Brick = struct {
     start: Vec3 = .{ 0, 0, 0 },
     end: Vec3 = .{ 0, 0, 0 },
 
-    supports: std.ArrayList(*Brick),
-    supportedBy: std.ArrayList(*Brick),
+    supports: std.SegmentedList(*Brick, 8),
+    supportedBy: std.SegmentedList(*Brick, 8),
+    allocator: std.mem.Allocator,
 
     fn parse(text: []const u8, allocator: std.mem.Allocator) !Brick {
         var brick: Brick = .{
-            .supports = std.ArrayList(*Brick).init(allocator),
-            .supportedBy = std.ArrayList(*Brick).init(allocator),
+            .supports = std.SegmentedList(*Brick, 8){},
+            .supportedBy = std.SegmentedList(*Brick, 8){},
+            .allocator = allocator,
         };
 
         var numIter = std.mem.tokenizeAny(u8, text, ",~");
@@ -77,8 +88,8 @@ const Brick = struct {
     }
 
     fn deinit(self: *Brick) void {
-        self.supports.deinit();
-        self.supportedBy.deinit();
+        self.supports.deinit(self.allocator);
+        self.supportedBy.deinit(self.allocator);
     }
 
     fn lowerThan(_: void, a: Brick, b: Brick) bool {
@@ -86,18 +97,18 @@ const Brick = struct {
     }
 
     fn fall(self: *Brick, bricks: []Brick) !void {
-        while (self.start[2] > 1 and self.end[2] > 1 and self.supportedBy.items.len == 0) {
+        while (self.start[2] > 1 and self.end[2] > 1 and self.supportedBy.count() == 0) {
             var o = bricks.len;
             while (o > 0) {
                 o -= 1;
                 var other = &bricks[o];
                 if (intersects(self.start - up, self.end - up, other.*.start, other.*.end)) {
-                    try other.*.supports.append(self);
-                    try self.supportedBy.append(other);
+                    try other.*.supports.append(self.allocator, self);
+                    try self.supportedBy.append(self.allocator, other);
                 }
             }
 
-            if (self.supportedBy.items.len == 0) {
+            if (self.supportedBy.count() == 0) {
                 self.start -= up;
                 self.end -= up;
             }
@@ -116,6 +127,31 @@ fn intersects(start: Vec3, end: Vec3, otherStart: Vec3, otherEnd: Vec3) bool {
         }
     }
     return false;
+}
+
+fn addAffectedBricks(moved: *Brick, set: *std.AutoHashMap(*Brick, void)) !void {
+    var supportsIter = moved.supports.iterator(0);
+    while (supportsIter.next()) |other| {
+        if (other.*.supportedBy.count() == 1 or containsAll(set, other.*.supportedBy.iterator(0))) {
+            try set.put(other.*, {});
+        }
+    }
+    supportsIter.set(0);
+    while (supportsIter.next()) |other| {
+        if (set.contains(other.*)) {
+            try addAffectedBricks(other.*, set);
+        }
+    }
+}
+
+fn containsAll(set: *std.AutoHashMap(*Brick, void), iter: std.SegmentedList(*Brick, 8).Iterator) bool {
+    var i = iter;
+    while (i.next()) |ptr| {
+        if (!set.contains(ptr.*)) {
+            return false;
+        }
+    }
+    return true;
 }
 
 const Vec3Iterator = struct {
