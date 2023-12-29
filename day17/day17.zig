@@ -30,7 +30,7 @@ fn minimizeHeatLoss(input: []const u8, minLineLength: usize, maxLineLength: usiz
     var from = std.AutoHashMap(Node, Node).init(allocator);
     defer from.deinit();
 
-    var openSet = std.PriorityDequeue(Node, *std.AutoHashMap(Node, usize), orderNode).init(allocator, &dist);
+    var openSet = std.PriorityQueue(Node, *std.AutoHashMap(Node, usize), orderNode).init(allocator, &dist);
     defer openSet.deinit();
 
     const startA = .{ .pos = startPos, .dir = null, .lineLength = 0 };
@@ -38,7 +38,7 @@ fn minimizeHeatLoss(input: []const u8, minLineLength: usize, maxLineLength: usiz
     try openSet.add(startA);
 
     while (openSet.count() > 0) {
-        const node = openSet.removeMin();
+        const node = openSet.remove();
         if (@reduce(.And, node.pos == goalPos)) {
             if (node.lineLength < minLineLength) {
                 continue;

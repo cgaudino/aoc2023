@@ -67,7 +67,7 @@ pub fn main() !void {
     try addAllConnected(otherNode, &connectedSet, &nodes);
     const countB = connectedSet.count();
 
-    std.debug.print("Part One: {d}\n", .{countA * countB});
+    std.debug.print("Produce of group sizes: {d}\n", .{countA * countB});
 }
 
 fn getRandomNode(nodes: *std.StringHashMap(Node), random: std.rand.Random) []const u8 {
